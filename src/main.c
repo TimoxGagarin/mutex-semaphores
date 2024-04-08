@@ -12,38 +12,23 @@
 #include <errno.h>
 #include <stddef.h>
 #include <inttypes.h>
+#include <pthread.h>
 
 #include "headers/constants.h"
 #include "headers/msg.h"
 #include "headers/queue.h"
 
 queue_t *queue;
-sem_t *mutex;
+pthread_mutex_t mutex;
 
 sem_t *free_space;
 sem_t *items;
 
-pid_t producers[CHILD_MAX];
+pthread_t producers[THREADS_MAX];
 int producers_amount;
 
-pid_t consumers[CHILD_MAX];
+pthread_t consumers[THREADS_MAX];
 int consumers_amount;
-
-static pid_t parent_pid;
-
-bool temp = false;
-
-/**
- * @brief Обработчик сигнала.
- *
- * Функция-обработчик для сигнала.
- *
- * @param sig Номер сигнала.
- */
-void handler(int sig)
-{
-    temp = true;
-}
 
 /**
  * @brief Создание нового процесса.
@@ -54,31 +39,20 @@ void handler(int sig)
  * @param count Количество созданных процессов.
  * @param func Указатель на функцию, которая будет выполнена в созданном процессе.
  */
-void new_process(pid_t *list, int *count, void (*func)(void))
+void new_process(pthread_t *list, int *count, void *(*func)(void *))
 {
-    if (*count == CHILD_MAX - 1)
+    if (*count == THREADS_MAX - 1)
     {
         fprintf(stderr, "Max value of processes\n");
         return;
     }
-
-    pid_t pid = fork();
-
-    if (pid == -1)
+    int res = pthread_create(&list[*count], NULL, func, NULL);
+    if (res)
     {
-        perror("fork");
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "Failed to create producer\n");
+        exit(res);
     }
-    else if (pid == 0)
-    {
-        func();
-    }
-    else
-    {
-        list[*count] = pid;
-        ++(*count);
-        return;
-    }
+    ++(*count);
 }
 
 /**
@@ -89,7 +63,7 @@ void new_process(pid_t *list, int *count, void (*func)(void))
  * @param list Массив идентификаторов процессов.
  * @param count Количество процессов в массиве.
  */
-void close_process(pid_t *list, int *count)
+void close_process(pthread_t *list, int *count)
 {
     if (*count == 0)
     {
@@ -98,8 +72,8 @@ void close_process(pid_t *list, int *count)
     }
 
     (*count)--;
-    kill(list[*count], SIGUSR1);
-    wait(NULL);
+    pthread_cancel(list[*count]);
+    pthread_join(list[*count], NULL);
 }
 
 /**
@@ -107,40 +81,20 @@ void close_process(pid_t *list, int *count)
  *
  * Функция инициализирует необходимые ресурсы для работы программы.
  */
-void init()
+
+void init(void)
 {
-    parent_pid = getpid();
-
-    int fd = shm_open("/queue", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR)); // mode(for fd) ~ 00400 | 00200 - owner can read and write
-    if (fd < 0)
-    {
-        fprintf(stderr, "shm_open");
-        exit(EXIT_FAILURE);
-    }
-
-    if (ftruncate(fd, sizeof(queue_t)))
-    {
-        fprintf(stderr, "ftruncate");
-        exit(EXIT_FAILURE);
-    }
-
-    void *ptr = mmap(NULL, sizeof(queue_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); // map_shared - other processes can see it
-    if (ptr == MAP_FAILED)
-    {
-        fprintf(stderr, "ftruncate");
-        exit(EXIT_FAILURE);
-    }
-
-    queue = (queue_t *)ptr;
+    queue = (queue_t *)malloc(sizeof(queue_t));
     new_queue(queue);
-
-    if (close(fd))
+    int res = pthread_mutex_init(&mutex, NULL);
+    if (res)
     {
-        fprintf(stderr, "close");
+        fprintf(stderr, "Failed mutex init \n");
         exit(EXIT_FAILURE);
     }
 
-    if ((mutex = sem_open("mutex", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 1)) == SEM_FAILED || (free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), MSG_MAX)) == SEM_FAILED || (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
+    if ((free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), START_MAX)) == SEM_FAILED ||
+        (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
     {
         fprintf(stderr, "sem_open");
         exit(EXIT_FAILURE);
@@ -154,31 +108,18 @@ void init()
  */
 void end()
 {
-    for (size_t i = 0; i < producers_amount; ++i)
+    int res = pthread_mutex_destroy(&mutex);
+    if (res)
     {
-        kill(producers[i], SIGKILL);
-        wait(NULL);
+        perror("Failed mutex destroy");
+        exit(EXIT_FAILURE);
     }
-    for (size_t i = 0; i < consumers_amount; ++i)
-    {
-        kill(consumers[i], SIGKILL);
-        wait(NULL);
-    }
-
-    if (shm_unlink("/queue"))
-    {
-        fprintf(stderr, "shm_unlink");
-        abort();
-    }
-    if (sem_unlink("mutex") ||
-        sem_unlink("free_space") ||
+    if (sem_unlink("free_space") ||
         sem_unlink("items"))
     {
-        fprintf(stderr, "sem_unlink");
+        perror("sem_unlink");
         abort();
     }
-
-    kill(parent_pid, SIGKILL);
 }
 
 /**
@@ -186,27 +127,27 @@ void end()
  *
  * Функция, выполняемая процессом производителя.
  */
-void producer_process()
+void *producer_process(void *arg)
 {
-    srand(getpid());
-
-    signal(SIGUSR1, handler);
     msg_t msg;
     int add_count_local;
     while (true)
     {
+        if (queue->max_size == 0)
+        {
+            fprintf(stderr, "Queue size is 0 \n");
+            exit(EXIT_FAILURE);
+        }
         new_msg(&msg);
         sem_wait(free_space);
-        sem_wait(mutex);
+        pthread_mutex_lock(&mutex);
 
         add_count_local = push(queue, &msg);
-        sem_post(mutex);
+        pthread_mutex_unlock(&mutex);
         sem_post(items);
 
-        printf("%d produce msg_t: hash=%X, added_amount=%d\n",
-               getpid(), msg.hash, add_count_local);
-        if (temp)
-            exit(EXIT_SUCCESS);
+        printf("%ld produce msg_t: hash=%X, added_amount=%d\n",
+               pthread_self(), msg.hash, add_count_local);
         sleep(4);
     }
 }
@@ -216,30 +157,61 @@ void producer_process()
  *
  * Функция, выполняемая процессом потребителя.
  */
-void consumer_process()
+void *consumer_process(void *args)
 {
-    signal(SIGUSR1, handler);
     msg_t msg;
     int extract_count_local;
     while (true)
     {
+        if (queue->max_size == 0)
+        {
+            fprintf(stderr, "Queue size is 0 \n");
+            exit(EXIT_FAILURE);
+        }
         sem_wait(items);
-        sem_wait(mutex);
+        pthread_mutex_lock(&mutex);
 
         extract_count_local = pop(queue, &msg);
 
-        sem_post(mutex);
+        pthread_mutex_unlock(&mutex);
         sem_post(free_space);
-
         handle_msg(&msg);
 
-        printf("%d consume msg_t: hash=%X, extracted_amount=%d\n",
-               getpid(), msg.hash, extract_count_local);
-        if (temp)
-            exit(EXIT_SUCCESS);
-
+        printf("%ld consume msg_t: hash=%X, extracted_amount=%d\n",
+               pthread_self(), msg.hash, extract_count_local);
         sleep(4);
     }
+}
+
+void increase_max_size()
+{
+    pthread_mutex_lock(&mutex);
+    if (queue->max_size != MSG_MAX)
+    {
+        queue->max_size++;
+        sem_post(free_space);
+    }
+    pthread_mutex_unlock(&mutex);
+}
+
+void decrease_max_size()
+{
+    pthread_mutex_lock(&mutex);
+    if (queue->max_size != 0)
+    {
+        if (queue->msg_count != 0)
+        {
+            queue->tail--;
+            if (queue->msg_count != queue->max_size)
+                sem_wait(free_space);
+            queue->msg_count--;
+            sem_wait(items);
+        }
+        queue->max_size--;
+    }
+    pthread_mutex_unlock(&mutex);
+    printf("%ld consume msg_t:extracted_amount=%d\n",
+           pthread_self(), queue->msg_count);
 }
 
 int main()
@@ -255,6 +227,8 @@ int main()
            "d: delete producer\n"
            "c: new consumer\n"
            "r: delete consumer\n"
+           "+: increase size by 1\n"
+           "-: decrease size by 1\n"
            "q: exit\n");
     while (true)
     {
@@ -267,6 +241,10 @@ int main()
             new_process(consumers, &consumers_amount, consumer_process);
         else if (operation == 'r')
             close_process(consumers, &consumers_amount);
+        else if (operation == '+')
+            increase_max_size();
+        else if (operation == '-')
+            decrease_max_size();
         else if (operation == 'q')
             break;
         else if (operation == '\n')

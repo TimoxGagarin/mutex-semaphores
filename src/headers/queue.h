@@ -6,6 +6,7 @@ typedef struct
 {
     int added_amount;
     int extracted_amount;
+    int max_size;
 
     int msg_count;
 
