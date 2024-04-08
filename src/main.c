@@ -111,23 +111,23 @@ void init()
 {
     parent_pid = getpid();
 
-    int fd = shm_open("/queue", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR)); // mode(for fd) ~ 00400 | 00200 - owner can read and write
+    int fd = shm_open("/queue", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR));
     if (fd < 0)
     {
-        fprintf(stderr, "shm_open");
+        perror("shm_open");
         exit(EXIT_FAILURE);
     }
 
     if (ftruncate(fd, sizeof(queue_t)))
     {
-        fprintf(stderr, "ftruncate");
+        perror("ftruncate");
         exit(EXIT_FAILURE);
     }
 
-    void *ptr = mmap(NULL, sizeof(queue_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); // map_shared - other processes can see it
+    void *ptr = mmap(NULL, sizeof(queue_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (ptr == MAP_FAILED)
     {
-        fprintf(stderr, "ftruncate");
+        perror("mmap");
         exit(EXIT_FAILURE);
     }
 
@@ -136,13 +136,13 @@ void init()
 
     if (close(fd))
     {
-        fprintf(stderr, "close");
+        perror("close");
         exit(EXIT_FAILURE);
     }
 
     if ((mutex = sem_open("mutex", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 1)) == SEM_FAILED || (free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), MSG_MAX)) == SEM_FAILED || (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
     {
-        fprintf(stderr, "sem_open");
+        perror("sem_open");
         exit(EXIT_FAILURE);
     }
 }
@@ -167,14 +167,14 @@ void end()
 
     if (shm_unlink("/queue"))
     {
-        fprintf(stderr, "shm_unlink");
+        perror("shm_unlink");
         abort();
     }
     if (sem_unlink("mutex") ||
         sem_unlink("free_space") ||
         sem_unlink("items"))
     {
-        fprintf(stderr, "sem_unlink");
+        perror("sem_unlink");
         abort();
     }
 
