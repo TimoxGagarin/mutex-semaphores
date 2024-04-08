@@ -33,43 +33,47 @@ int consumers_amount;
 /**
  * @brief Создание нового процесса.
  *
- * Функция создает новый процесс, используя указанную функцию.
+ * Функция создает новый поток, используя указанную функцию.
  *
- * @param list Массив идентификаторов процессов.
- * @param count Количество созданных процессов.
- * @param func Указатель на функцию, которая будет выполнена в созданном процессе.
+ * @param list Массив идентификаторов потоков.
+ * @param count Указатель на переменную, хранящую количество созданных потоков.
+ * @param func Указатель на функцию, которая будет выполнена в созданном потоке.
  */
 void new_process(pthread_t *list, int *count, void *(*func)(void *))
 {
+    // Проверка, достигнуто ли максимальное количество потоков.
     if (*count == THREADS_MAX - 1)
     {
-        fprintf(stderr, "Max value of processes\n");
+        fprintf(stderr, "Max value of threads\n");
         return;
     }
-    if (!pthread_create(&list[*count], NULL, func, NULL))
+    // Создание нового потока.
+    if (pthread_create(&list[*count], NULL, func, NULL))
     {
-        perror("Failed to create producer\n");
+        perror("Failed to create thread\n");
         exit(EXIT_FAILURE);
     }
     ++(*count);
 }
 
 /**
- * @brief Закрытие процесса.
+ * @brief Закрытие потока.
  *
- * Функция закрывает процесс, остановив его выполнение и освободив ресурсы.
+ * Функция закрывает поток, останавливая его выполнение и освобождая ресурсы.
  *
- * @param list Массив идентификаторов процессов.
- * @param count Количество процессов в массиве.
+ * @param list Массив идентификаторов потоков.
+ * @param count Указатель на переменную, хранящую количество потоков в массиве.
  */
 void close_process(pthread_t *list, int *count)
 {
+    // Проверка, есть ли потоки для закрытия.
     if (*count == 0)
     {
-        fprintf(stderr, "No process to delete\n");
+        fprintf(stderr, "No thread to delete\n");
         return;
     }
 
+    // Уменьшение счетчика потоков и ожидание завершения потока.
     (*count)--;
     pthread_cancel(list[*count]);
     pthread_join(list[*count], NULL);
@@ -80,11 +84,13 @@ void close_process(pthread_t *list, int *count)
  *
  * Функция инициализирует необходимые ресурсы для работы программы.
  */
-
 void init(void)
 {
+    // Выделение памяти под очередь и инициализация очереди.
     queue = (queue_t *)malloc(sizeof(queue_t));
     new_queue(queue);
+
+    // Инициализация мьютекса.
     int res = pthread_mutex_init(&mutex, NULL);
     if (res)
     {
@@ -92,6 +98,7 @@ void init(void)
         exit(EXIT_FAILURE);
     }
 
+    // Создание семафоров.
     if ((free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), START_MAX)) == SEM_FAILED ||
         (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
     {
@@ -107,12 +114,14 @@ void init(void)
  */
 void end()
 {
+    // Уничтожение мьютекса.
     int res = pthread_mutex_destroy(&mutex);
     if (res)
     {
         perror("Failed mutex destroy");
         exit(EXIT_FAILURE);
     }
+    // Удаление семафоров.
     if (sem_unlink("free_space") ||
         sem_unlink("items"))
     {
@@ -182,6 +191,12 @@ void *consumer_process(void *args)
     }
 }
 
+/**
+ * @brief Увеличение максимального размера очереди.
+ *
+ * Функция увеличивает максимальный размер очереди на 1, если это возможно,
+ * и увеличивает счетчик свободного места в очереди.
+ */
 void increase_max_size()
 {
     pthread_mutex_lock(&mutex);
@@ -193,6 +208,12 @@ void increase_max_size()
     pthread_mutex_unlock(&mutex);
 }
 
+/**
+ * @brief Уменьшение максимального размера очереди.
+ *
+ * Функция уменьшает максимальный размер очереди на 1, если это возможно,
+ * и обновляет счетчики свободного места и количества элементов в очереди.
+ */
 void decrease_max_size()
 {
     pthread_mutex_lock(&mutex);
@@ -208,9 +229,10 @@ void decrease_max_size()
         }
         queue->max_size--;
     }
-    pthread_mutex_unlock(&mutex);
+
     printf("%ld consume msg_t:extracted_amount=%d\n",
            pthread_self(), queue->msg_count);
+    pthread_mutex_unlock(&mutex);
 }
 
 int main()
