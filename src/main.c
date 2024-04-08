@@ -46,11 +46,10 @@ void new_process(pthread_t *list, int *count, void *(*func)(void *))
         fprintf(stderr, "Max value of processes\n");
         return;
     }
-    int res = pthread_create(&list[*count], NULL, func, NULL);
-    if (res)
+    if (!pthread_create(&list[*count], NULL, func, NULL))
     {
-        fprintf(stderr, "Failed to create producer\n");
-        exit(res);
+        perror("Failed to create producer\n");
+        exit(EXIT_FAILURE);
     }
     ++(*count);
 }
@@ -89,14 +88,14 @@ void init(void)
     int res = pthread_mutex_init(&mutex, NULL);
     if (res)
     {
-        fprintf(stderr, "Failed mutex init \n");
+        perror("Failed mutex init");
         exit(EXIT_FAILURE);
     }
 
     if ((free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), START_MAX)) == SEM_FAILED ||
         (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
     {
-        fprintf(stderr, "sem_open");
+        perror("sem_open");
         exit(EXIT_FAILURE);
     }
 }
