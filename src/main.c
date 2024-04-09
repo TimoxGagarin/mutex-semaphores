@@ -140,7 +140,9 @@ void init()
         exit(EXIT_FAILURE);
     }
 
-    if ((mutex = sem_open("mutex", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 1)) == SEM_FAILED || (free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), MSG_MAX)) == SEM_FAILED || (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
+    if ((mutex = sem_open("mutex", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 1)) == SEM_FAILED ||
+        (free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), MSG_MAX)) == SEM_FAILED ||
+        (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
     {
         perror("sem_open");
         exit(EXIT_FAILURE);
@@ -237,7 +239,6 @@ void consumer_process()
                getpid(), msg.hash, extract_count_local);
         if (temp)
             exit(EXIT_SUCCESS);
-
         sleep(4);
     }
 }
