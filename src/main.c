@@ -21,12 +21,11 @@
 queue_t *queue;
 pthread_mutex_t mutex;
 
-sem_t *free_space;
-sem_t *items;
-
+pthread_cond_t cond_producer = PTHREAD_COND_INITIALIZER;
 pthread_t producers[THREADS_MAX];
 int producers_amount;
 
+pthread_cond_t cond_consumer = PTHREAD_COND_INITIALIZER;
 pthread_t consumers[THREADS_MAX];
 int consumers_amount;
 
@@ -98,11 +97,17 @@ void init(void)
         exit(EXIT_FAILURE);
     }
 
-    // Создание семафоров.
-    if ((free_space = sem_open("free_space", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), START_MAX)) == SEM_FAILED ||
-        (items = sem_open("items", (O_RDWR | O_CREAT | O_TRUNC), (S_IRUSR | S_IWUSR), 0)) == SEM_FAILED)
+    int ret = pthread_cond_init(&cond_producer, NULL);
+    if (ret != 0)
     {
-        perror("sem_open");
+        perror("Error initializing cond_producer");
+        exit(EXIT_FAILURE);
+    }
+
+    ret = pthread_cond_init(&cond_consumer, NULL);
+    if (ret != 0)
+    {
+        perror("Error initializing cond_consumer");
         exit(EXIT_FAILURE);
     }
 }
@@ -114,20 +119,56 @@ void init(void)
  */
 void end()
 {
-    // Уничтожение мьютекса.
+    for (int i = producers_amount; i >= 0; i--)
+    {
+        if (pthread_cancel(producers[i]))
+        {
+            fprintf(stderr, "Failed to cancel producer\n");
+            exit(EXIT_FAILURE);
+        }
+        if (pthread_join(producers[i], NULL))
+        {
+            fprintf(stderr, "Failed to join producer\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    for (int i = consumers_amount; i >= 0; i--)
+    {
+        if (pthread_cancel(consumers[i]))
+        {
+            fprintf(stderr, "Failed to cancel consumer\n");
+            exit(EXIT_FAILURE);
+        }
+        if (pthread_join(consumers[i], NULL))
+        {
+            fprintf(stderr, "Failed to join consumer\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
     int res = pthread_mutex_destroy(&mutex);
     if (res)
     {
-        perror("Failed mutex destroy");
+        fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(res));
         exit(EXIT_FAILURE);
     }
-    // Удаление семафоров.
-    if (sem_unlink("free_space") ||
-        sem_unlink("items"))
+
+    res = pthread_cond_destroy(&cond_producer);
+    if (res)
     {
-        perror("sem_unlink");
-        abort();
+        fprintf(stderr, "Failed to destroy cond_producer: %s\n", strerror(res));
+        exit(EXIT_FAILURE);
     }
+
+    res = pthread_cond_destroy(&cond_consumer);
+    if (res)
+    {
+        fprintf(stderr, "Failed to destroy cond_consumer: %s\n", strerror(res));
+        exit(EXIT_FAILURE);
+    }
+
+    exit(EXIT_SUCCESS);
 }
 
 /**
@@ -141,18 +182,15 @@ void *producer_process(void *arg)
     int add_count_local;
     while (true)
     {
-        if (queue->max_size == 0)
-        {
-            fprintf(stderr, "Queue size is 0 \n");
-            exit(EXIT_FAILURE);
-        }
         new_msg(&msg);
-        sem_wait(free_space);
         pthread_mutex_lock(&mutex);
 
+        while (queue->msg_count == MSG_MAX - 1)
+            pthread_cond_wait(&cond_producer, &mutex);
+
         add_count_local = push(queue, &msg);
+        pthread_cond_signal(&cond_consumer);
         pthread_mutex_unlock(&mutex);
-        sem_post(items);
 
         printf("%ld produce msg_t: hash=%X, added_amount=%d\n",
                pthread_self(), msg.hash, add_count_local);
@@ -171,68 +209,22 @@ void *consumer_process(void *args)
     int extract_count_local;
     while (true)
     {
-        if (queue->max_size == 0)
-        {
-            fprintf(stderr, "Queue size is 0 \n");
-            exit(EXIT_FAILURE);
-        }
-        sem_wait(items);
         pthread_mutex_lock(&mutex);
 
+        while (queue->msg_count == 0)
+            pthread_cond_wait(&cond_consumer, &mutex);
+
         extract_count_local = pop(queue, &msg);
+        pthread_cond_signal(&cond_producer);
 
         pthread_mutex_unlock(&mutex);
-        sem_post(free_space);
+
         handle_msg(&msg);
 
         printf("%ld consume msg_t: hash=%X, extracted_amount=%d\n",
                pthread_self(), msg.hash, extract_count_local);
         sleep(4);
     }
-}
-
-/**
- * @brief Увеличение максимального размера очереди.
- *
- * Функция увеличивает максимальный размер очереди на 1, если это возможно,
- * и увеличивает счетчик свободного места в очереди.
- */
-void increase_max_size()
-{
-    pthread_mutex_lock(&mutex);
-    if (queue->max_size != MSG_MAX)
-    {
-        queue->max_size++;
-        sem_post(free_space);
-    }
-    pthread_mutex_unlock(&mutex);
-}
-
-/**
- * @brief Уменьшение максимального размера очереди.
- *
- * Функция уменьшает максимальный размер очереди на 1, если это возможно,
- * и обновляет счетчики свободного места и количества элементов в очереди.
- */
-void decrease_max_size()
-{
-    pthread_mutex_lock(&mutex);
-    if (queue->max_size != 0)
-    {
-        if (queue->msg_count != 0)
-        {
-            queue->tail--;
-            if (queue->msg_count != queue->max_size)
-                sem_wait(free_space);
-            queue->msg_count--;
-            sem_wait(items);
-        }
-        queue->max_size--;
-    }
-
-    printf("%ld consume msg_t:extracted_amount=%d\n",
-           pthread_self(), queue->msg_count);
-    pthread_mutex_unlock(&mutex);
 }
 
 int main()
@@ -248,8 +240,6 @@ int main()
            "d: delete producer\n"
            "c: new consumer\n"
            "r: delete consumer\n"
-           "+: increase size by 1\n"
-           "-: decrease size by 1\n"
            "q: exit\n");
     while (true)
     {
@@ -262,10 +252,6 @@ int main()
             new_process(consumers, &consumers_amount, consumer_process);
         else if (operation == 'r')
             close_process(consumers, &consumers_amount);
-        else if (operation == '+')
-            increase_max_size();
-        else if (operation == '-')
-            decrease_max_size();
         else if (operation == 'q')
             break;
         else if (operation == '\n')
