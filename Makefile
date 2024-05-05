@@ -22,23 +22,24 @@ ifeq ($(MODE), release)
 endif
 
 main_objects = $(OUT_DIR)/main.o $(OUT_DIR)/queue.o $(OUT_DIR)/msg.o
-
 main_prog = $(OUT_DIR)/main
 
-run: all
-	@echo $(MSG_INFO)
-	@./$(main_prog) $(main_args)
+students_objects = $(OUT_DIR)/students.o
+students_prog = $(OUT_DIR)/students
 
-all: $(main_prog) $(producer_prog) $(consumer_prog)
+generator_objects = $(OUT_DIR)/generator.o
+generator_prog = $(OUT_DIR)/generator
+
+all: $(main_prog) $(students_prog) $(generator_prog)
 
 $(main_prog) : $(main_objects)
 	@$(CC) $(CFLAGS) $(main_objects) -o $@
 
-$(producer_prog) : $(producer_objects)
-	@$(CC) $(CFLAGS) $(producer_objects) -o $@
+$(students_prog) : $(students_objects)
+	@$(CC) $(CFLAGS) $(students_objects) -o $@
 
-$(consumer_prog) : $(consumer_objects)
-	@$(CC) $(CFLAGS) $(consumer_objects) -o $@
+$(generator_prog) : $(generator_objects)
+	@$(CC) $(CFLAGS) $(generator_objects) -o $@
 	
 $(OUT_DIR)/%.o : %.c
 	@$(CC) -c $(CFLAGS) $^ -o $@
