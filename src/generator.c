@@ -5,7 +5,7 @@
 
 int main()
 {
-    FILE *file = fopen("file.bin", "wb"); // Открыть файл для записи в бинарном формате
+    FILE *file = fopen("file.bin", "wb");
     if (file == NULL)
     {
         perror("Failure opening file");

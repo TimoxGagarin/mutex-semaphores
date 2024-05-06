@@ -10,20 +10,20 @@
 int descriptor = 0;
 bool FLAG_EDIT = false;
 
-bool is_equal(const record_t *a, const record_t *b);
-void reccpy(record_t *to, const record_t *from);
+bool is_equal(const record_t *, const record_t *);
+void reccpy(record_t *, const record_t *);
 void read_all();
-bool get_i_record(size_t i, record_t *record_);
-void update_n_records(size_t n, record_t *record_, record_t *savedRecord);
-bool add_i_record(record_t *newRecord, const record_t *record_, const record_t *savedRecord, size_t i);
+bool get_i_record(size_t, record_t *);
+void update_i_records(size_t, record_t *, record_t *);
+bool add_i_record(record_t *, const record_t *, const record_t *, size_t);
 
 int main()
 {
     bool cycleFlag = true;
-    record_t REC;
-    record_t SAVED_REC;
-    record_t NEW_REC;
-    size_t REC_NUM = 0;
+    record_t record;
+    record_t saved_record;
+    record_t new_record;
+    size_t records_count = 0;
 
     descriptor = open("file.bin", O_RDWR);
     if (descriptor == -1)
@@ -38,6 +38,7 @@ int main()
         if (ch != '\n')
             puts("1.Display all records.\n2.Update record_t.\n3.Get num_record.\n4.Add last modified record_t.\n5.Exit.");
         ch = getchar();
+
         if (ch == '\n')
             continue;
         else if (ch == '1')
@@ -45,8 +46,8 @@ int main()
         else if (ch == '2')
         {
             puts("Enter the num of record_t: ");
-            scanf("%lu", &REC_NUM);
-            update_n_records(REC_NUM, &REC, &SAVED_REC);
+            scanf("%lu", &records_count);
+            update_i_records(records_count, &record, &saved_record);
         }
         else if (ch == '3')
         {
@@ -65,10 +66,10 @@ int main()
         {
             if (!FLAG_EDIT)
                 puts("No entry has been changed!");
-            else if (!add_i_record(&NEW_REC, &REC, &SAVED_REC, REC_NUM))
+            else if (!add_i_record(&new_record, &record, &saved_record, records_count))
             {
                 puts("The data has been changed by someone, please repeat the editing operation again.");
-                update_n_records(REC_NUM, &REC, &SAVED_REC);
+                update_i_records(records_count, &record, &saved_record);
             }
         }
         else if (ch == '5')
@@ -144,14 +145,14 @@ bool get_i_record(size_t i, record_t *record_)
     return true;
 }
 
-void update_n_records(size_t n, record_t *record_, record_t *savedRecord)
+void update_i_records(size_t n, record_t *record_, record_t *saved_record)
 {
     if (!get_i_record(n, record_))
     {
         puts("No record_t founded");
         return;
     }
-    reccpy(savedRecord, record_);
+    reccpy(saved_record, record_);
     bool continueFlag = true;
     char ch = 0;
     do
@@ -194,10 +195,10 @@ void update_n_records(size_t n, record_t *record_, record_t *savedRecord)
         else
             puts("Incorrect input.");
     } while (continueFlag);
-    FLAG_EDIT = !is_equal(record_, savedRecord);
+    FLAG_EDIT = !is_equal(record_, saved_record);
 }
 
-bool add_i_record(record_t *newRecord, const record_t *record_, const record_t *savedRecord, size_t i)
+bool add_i_record(record_t *new_record, const record_t *record_, const record_t *saved_record, size_t i)
 {
     struct flock parameters;
     parameters.l_type = F_WRLCK;
@@ -207,8 +208,8 @@ bool add_i_record(record_t *newRecord, const record_t *record_, const record_t *
     if (fcntl(descriptor, F_SETLKW, &parameters) < 0)
         perror("F_SETLKW");
     parameters.l_type = F_UNLCK;
-    get_i_record(i, newRecord);
-    if (!is_equal(savedRecord, newRecord))
+    get_i_record(i, new_record);
+    if (!is_equal(saved_record, new_record))
     {
         fcntl(descriptor, F_SETLK, &parameters);
         return false;
