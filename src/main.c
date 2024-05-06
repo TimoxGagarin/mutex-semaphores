@@ -85,27 +85,19 @@ void close_process(pthread_t *list, int *count)
  */
 void init(void)
 {
-    // Выделение памяти под очередь и инициализация очереди.
     queue = (queue_t *)malloc(sizeof(queue_t));
     new_queue(queue);
-
-    // Инициализация мьютекса.
-    int res = pthread_mutex_init(&mutex, NULL);
-    if (res)
+    if (pthread_mutex_init(&mutex, NULL))
     {
         perror("Failed mutex init");
         exit(EXIT_FAILURE);
     }
-
-    int ret = pthread_cond_init(&cond_producer, NULL);
-    if (ret != 0)
+    if (pthread_cond_init(&cond_producer, NULL))
     {
         perror("Error initializing cond_producer");
         exit(EXIT_FAILURE);
     }
-
-    ret = pthread_cond_init(&cond_consumer, NULL);
-    if (ret != 0)
+    if (pthread_cond_init(&cond_consumer, NULL))
     {
         perror("Error initializing cond_consumer");
         exit(EXIT_FAILURE);
@@ -123,12 +115,12 @@ void end()
     {
         if (pthread_cancel(producers[i]))
         {
-            fprintf(stderr, "Failed to cancel producer\n");
+            perror("Failed to cancel producer");
             exit(EXIT_FAILURE);
         }
         if (pthread_join(producers[i], NULL))
         {
-            fprintf(stderr, "Failed to join producer\n");
+            perror("Failed to join producer");
             exit(EXIT_FAILURE);
         }
     }
@@ -137,34 +129,29 @@ void end()
     {
         if (pthread_cancel(consumers[i]))
         {
-            fprintf(stderr, "Failed to cancel consumer\n");
+            perror("Failed to cancel consumer");
             exit(EXIT_FAILURE);
         }
         if (pthread_join(consumers[i], NULL))
         {
-            fprintf(stderr, "Failed to join consumer\n");
+            perror("Failed to join consumer");
             exit(EXIT_FAILURE);
         }
     }
 
-    int res = pthread_mutex_destroy(&mutex);
-    if (res)
+    if (pthread_mutex_destroy(&mutex))
     {
-        fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(res));
+        perror("Failed to destroy mutex");
         exit(EXIT_FAILURE);
     }
-
-    res = pthread_cond_destroy(&cond_producer);
-    if (res)
+    if (pthread_cond_destroy(&cond_producer))
     {
-        fprintf(stderr, "Failed to destroy cond_producer: %s\n", strerror(res));
+        perror("Failed to destroy cond_producer");
         exit(EXIT_FAILURE);
     }
-
-    res = pthread_cond_destroy(&cond_consumer);
-    if (res)
+    if (pthread_cond_destroy(&cond_consumer))
     {
-        fprintf(stderr, "Failed to destroy cond_consumer: %s\n", strerror(res));
+        perror("Failed to destroy cond_consumer");
         exit(EXIT_FAILURE);
     }
 
@@ -184,14 +171,11 @@ void *producer_process(void *arg)
     {
         new_msg(&msg);
         pthread_mutex_lock(&mutex);
-
         while (queue->msg_count == MSG_MAX - 1)
             pthread_cond_wait(&cond_producer, &mutex);
-
         add_count_local = push(queue, &msg);
         pthread_cond_signal(&cond_consumer);
         pthread_mutex_unlock(&mutex);
-
         printf("%ld produce msg_t: hash=%X, added_amount=%d\n",
                pthread_self(), msg.hash, add_count_local);
         sleep(4);
@@ -210,17 +194,12 @@ void *consumer_process(void *args)
     while (true)
     {
         pthread_mutex_lock(&mutex);
-
         while (queue->msg_count == 0)
             pthread_cond_wait(&cond_consumer, &mutex);
-
         extract_count_local = pop(queue, &msg);
         pthread_cond_signal(&cond_producer);
-
         pthread_mutex_unlock(&mutex);
-
         handle_msg(&msg);
-
         printf("%ld consume msg_t: hash=%X, extracted_amount=%d\n",
                pthread_self(), msg.hash, extract_count_local);
         sleep(4);
